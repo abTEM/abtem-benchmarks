@@ -1,0 +1,13 @@
+live objects: 352063
+numpy buffers: 2 distinct, 0 MB total
+cupy device pool: 11 MB reserved, 2 MB in use
+
+retained bytes by holder (buffers > 256 KB):
+
+largest individual buffers:
+        0 MB  shape=() dtype=float64
+        0 MB  shape=() dtype=float64
+
+memoize-style caches found:
+  abtem.measurements._polar_detector_bins_cached: CacheInfo(hits=0, misses=17, maxsize=8, currsize=8)
+  abtem.measurements._radial_binning_device_arrays_cached: CacheInfo(hits=23, misses=17, maxsize=8, currsize=8)

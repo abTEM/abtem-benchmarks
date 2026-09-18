@@ -1,0 +1,14 @@
+[
+  {
+    "condition": "nogpaw",
+    "killed": null,
+    "peak_gb": 2.2452850341796875,
+    "jsonl": "/workspaces/run/abtem_accum_results/nogpaw.jsonl"
+  },
+  {
+    "condition": "neither",
+    "killed": null,
+    "peak_gb": 2.2452850341796875,
+    "jsonl": "/workspaces/run/abtem_accum_results/neither.jsonl"
+  }
+]
