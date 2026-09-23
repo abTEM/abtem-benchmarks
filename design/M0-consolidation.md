@@ -1,6 +1,6 @@
 # M0: Consolidation
 
-Status: done 2026-09-18 except the items under "left for Paul". No commits made; Paul reviews the tree first.
+Status: done. Tree committed and pushed 2026-09-18 (three commits); design summary and two follow-ups posted on #380 (2026-09-18, 2026-09-19). Only item 3 under "Left for Paul" remains.
 
 ## Goal
 
@@ -30,8 +30,8 @@ All present in the tree; see `git -C /workspaces/run/abtem-benchmarks status`.
 
 ## Left for Paul
 
-1. Reply on discussion #380 with the design summary (drafted outside this repository; it corrects the built-in transition-potential point).
-2. Commit the abtem-benchmarks tree once the design is agreed (suggested split: legacy copies + provenance in one commit, design docs in another, README in a third).
+1. Done 2026-09-18: design summary posted on #380 (it corrects the built-in transition-potential point), followed by the repository-roles and routine-tier follow-ups.
+2. Done 2026-09-18: tree committed in three commits (legacy + provenance, design, README).
 3. Add the devcontainer mount so the clone appears under `/workspaces/code/abtem-benchmarks`:
    `"source=${localWorkspaceFolder}/../code/abtem-benchmarks,target=/workspaces/code/abtem-benchmarks,type=bind"` after moving the clone on the host into `code/`.
 

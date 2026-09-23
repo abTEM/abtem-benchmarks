@@ -17,6 +17,8 @@ Runner and compare:
 - Graph-transport meter for lazy cases: task count and pickled graph bytes.
 - Per-case noise floors stored in the self-check bundle and used by compare.
 
+If the #380 follow-up of 2026-09-19 is accepted (DESIGN 15.2), M2 also gains `abtem-bench profile <case-id>` and the first `routine.*` case, `routine.radial_bin_sum`; both are scoped there and not below.
+
 Cases (see DESIGN section 11 for parameters): `potential.finite`, `potential.crystal`, `potential.chunked`, `stem.haadf[batch1|batch8|auto|eager]`, `stem.4d`, `stem.flexible`, `stem.thickness_series`, `prism.scan`, `phonons.haadf` (with `displacements` and `seeds` outputs), `energy.ensemble`, `hrtem.focal_spread`, `coreloss.image` (synthetic seeded transition potential everywhere; real O K asset on local tiers, produced once with GPAW and stored in abtem-benchmarks under `refs/assets/`), `coreloss.prism` (interpolation 1 to 3, `[crop]`), `bloch.diffraction`, `grid.fastfft_pair`, `consistency.cache_reuse`, `gpu.multigpu_one_worker` (guarded, runs only where dask-cuda and two devices exist).
 
 Legacy mining: a table in `benchmarks/README.md` (mirrored in `legacy/PROVENANCE.md`) mapping each of the 13 abTEM scripts and the run-directory scripts to the case that reproduces it, with a note on what was deliberately not carried over (the tracemalloc profilers, the pool-tracing diagnostic).

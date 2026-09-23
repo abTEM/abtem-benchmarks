@@ -1,8 +1,8 @@
 # abTEM regression benchmark suite: design (v2)
 
-Status: draft for review, 2026-09-18. Supersedes `DESIGN-v1-2026-09-10.md` (kept for the record). Revised after Toma Susi's reply of 2026-09-17 on [abTEM discussion #380](https://github.com/abTEM/abTEM/discussions/380) and the lessons recorded from earlier benchmark work (see `../legacy/PROVENANCE.md`). Milestones: `M0-consolidation.md` to `M4-ci-and-retirement.md`.
+Status: posted for review on #380 on 2026-09-18 (design summary) with two follow-ups on 2026-09-18 (repository roles) and 2026-09-19 (routine tier and profiling mode); Toma has not yet replied to any of the three as of 2026-09-23. The two follow-ups are recorded as open proposals in section 15.2 and are not part of this design until accepted. M1 is unaffected by either and has started. Supersedes `DESIGN-v1-2026-09-10.md` (kept for the record). Revised after Toma Susi's reply of 2026-09-17 on [abTEM discussion #380](https://github.com/abTEM/abTEM/discussions/380) and the lessons recorded from earlier benchmark work (see `../legacy/PROVENANCE.md`). Milestones: `M0-consolidation.md` to `M4-ci-and-retirement.md`.
 
-Repository split: the harness (`benchmarks/abtem_bench`) and the case definitions (`benchmarks/cases`) live in `abTEM/abTEM`; reference bundles, this design, and the frozen legacy scripts live in `abTEM/abtem-benchmarks`.
+Repository split: the harness (`benchmarks/abtem_bench`) and the case definitions (`benchmarks/cases`) live in `abTEM/abTEM`; reference bundles, this design, and the frozen legacy scripts live in `abTEM/abtem-benchmarks`. (The roles of the two repositories are under discussion, see 15.2.)
 
 ## 1. Purpose
 
@@ -16,7 +16,7 @@ Three uses, in order of urgency:
 
 "Result change" means: arrays differ beyond the case's stated tolerance, or shape, dtype, axes sampling, offset or units changed. A flagged change is not automatically a bug; it must be accepted deliberately, and the acceptance record is the changelog entry.
 
-Non-goals: validation of the physics against other codes or experiment; kernel micro-benchmarks; absolute performance claims across machines; a public leaderboard.
+Non-goals: validation of the physics against other codes or experiment; kernel micro-benchmarks (a narrower `routine.*` tier is proposed on #380, see 15.2); absolute performance claims across machines; a public leaderboard.
 
 ## 2. What changed relative to v1 (2026-09-10)
 
@@ -85,7 +85,7 @@ The three modes share the registry, worker, meters, store and compare. Only the 
 - `abtem_bench/compare.py`: pairing, metric vector, verdicts, `accepted_changes`, noise-floor thresholds, Markdown and JSON reports, exit code.
 - `abtem_bench/refs.py`: bundle naming, upload and fetch via `gh release`, local cache under `~/.cache/abtem-bench/refs`.
 - `abtem_bench/fixtures.py`: structures (Si, SrTiO3, graphene, hBN), synthetic transition potentials, helpers that must work on every ref.
-- `abtem_bench/cli.py`: `list`, `capture`, `run`, `compare`, `refs`, `self-check`.
+- `abtem_bench/cli.py`: `list`, `capture`, `run`, `compare`, `refs`, `self-check` (`profile` proposed on #380, see 15.2).
 
 ### 4.3 Invariants
 
@@ -303,7 +303,7 @@ abtem/core/testing.py       # array_is_close (moved), close_stats (new); test/ut
 
 `python -m abtem_bench` works with `PYTHONPATH=benchmarks` or after `uv pip install -e benchmarks`; the runner always uses the `PYTHONPATH` form so the worker sees the invoking checkout's harness. The main `pyproject.toml` gains `[tool.setuptools.packages.find] exclude = ["benchmarks*", "test*"]` so nothing ships in the wheel. ruff already covers `benchmarks/` (only `test` is excluded); `mypy.ini` gains `files = abtem, benchmarks/abtem_bench`. The stale `.pre-commit-config.yaml` (black and flake8 at 120 columns) is aligned to ruff in M4. Harness tests run under `pytest benchmarks/tests` in the normal CI job.
 
-abtem-benchmarks: `design/`, `legacy/`, `refs/` as in `../README.md`.
+abtem-benchmarks: `design/`, `legacy/`, `refs/` as in `../README.md` (layout under discussion, see 15.2).
 
 ## 13. CI
 
@@ -323,9 +323,19 @@ Perlmutter (A100, account per `dev-env/cron/README.md`): the citable GPU machine
 
 ## 15. Risks and open questions
 
+### 15.1 Risks
+
 - Bit identity across machines is not achievable (numba `fastmath`, BLAS, FFTW codelets); the fingerprint policy makes this explicit rather than silently tolerant.
 - GPU float64 tolerance will be case-dependent; the self-check floor per case is stored in the bundle so compare can use per-case floors rather than one global number.
 - `accepted_changes` globs can be written too broadly; the stale-entry check and the reviewer see the matched drift vector in the report.
 - The synthetic transition potential exercises the scatter machinery but not the radial solver; the real O K asset covers physics locally, and both are labelled as such in reports.
 - Reference bundle captures must run on a quiet machine; the manifest records load average and `MemAvailable` at start so a noisy capture can be recognised later.
 - The `[order1]` variant makes the propagator change attributable, but two changes in one PR can still hide behind one accepted entry; the reason field must name the PR.
+
+### 15.2 Open proposals on #380, not yet in this design
+
+Both were posted as follow-ups after the design summary and await Toma's answer. Neither blocks M1.
+
+1. Repository roles (posted 2026-09-18). With harness and cases in abTEM and bundles as release assets, everything else here could live in abTEM too. Option 1: make abtem-benchmarks the data and history repository (bundles as its release assets, committed per-commit speed/memory/self-check records, archived reports, the 2023 scaling studies); move `design/` and `PROVENANCE.md` to `abTEM/benchmarks/docs/`; drop `legacy/` in favour of SHA citations (`git show c1d18e9f:benchmarks/<file>`). Option 2: everything in abTEM, bundles attached to existing releases only (never a new release: `publish.yml` publishes to PyPI on every `published` event), history only in CI summaries. Recommendation posted: option 1. Affects sections 2, 10, 12 and M4.
+
+2. Routine tier and profiling mode (posted 2026-09-19, prompted by #438). `abtem-bench profile <case-id>`: runs one case once with monkeypatch-and-synchronize instrumentation of its major internal calls and reports percent of wall time per call; never compared across refs, no tolerance; may force eager execution and a single worker and says so. `routine.*` cases: target one internal function directly (first entry `routine.radial_bin_sum`, sweeping batch size and bin count, cited to #438); earned by an incident, never speculative; owned by whoever touches the hot path, updated in the same PR; speed only, correctness stays in `test/`; `requires=` guards expected to be load-bearing. Would revise the non-goals line in section 1, the CLI list in 4.2, the case matrix in 11 and the M2 scope.
