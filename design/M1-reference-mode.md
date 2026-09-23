@@ -9,7 +9,7 @@ Status 2026-09-23: harness, four cases, tests and docs implemented on the `bench
 - Self-check (`dev` captured twice, interleaved): all 9 case ids bit-identical; speed spread at most 1.1 %, peak-RSS spread at most 0.3 %.
 - `dev` vs `v1.0.10`, default variants: every multislice case drifts as expected from the exact propagator (#298): `hrtem.exitwave` rel 1.6e-1 / intensity 2.0e-4, `diffraction.cbed` rel 1.2 / intensity 1.2e-4, `stem.multidetector` rel 5.1e-3 / intensity 3.9e-3. These are accepted in `accepted_changes.toml` with PR 298.
 - `dev[order1]` vs `v1.0.10` (propagator held at order 1): a residual drift remains: `hrtem.exitwave` 2.5e-7, `diffraction.cbed` 1.3e-6, `stem.multidetector` 1.0e-6 relative, and `potential.infinite` itself 7.4e-8 relative (intensity 2.8e-8). Bisecting `potential.infinite` over the first-parent merges between v1.0.10 and dev with the harness itself points at `8fa77bdd`, PR #269 (potential chunking and GPU update, 2026-07-15), as the first merge that changes the CPU float64 infinite-projection potential (5.1e-8 relative). Not accepted: it is Toma's call whether this is an intended numerical change (it is far above float64 round-off) and it needs a reason line.
-- Speed and memory: no flags; dev is 0 to 9 % faster than v1.0.10 on every case at this size, peak RSS within 5 %.
+- Speed and memory: no flags; dev is between 1 % slower and 9 % faster than v1.0.10 across the cases at this size, peak RSS within 5 %.
 
 
 ## Goal
