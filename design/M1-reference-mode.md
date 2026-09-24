@@ -20,6 +20,14 @@ Status 2026-09-23: harness, four cases, tests and docs implemented on the `bench
 - GPU quick-tier wall times are 0.07-0.6 s; differences of tens of ms are launch jitter. compare marks speed ratios on runs shorter than `--min-time` (0.5 s) as `short` instead of flagging. GPU speed is judged on the standard tier.
 - Cold ratios on GPU (down to 0.15 in the self-check) are not comparable across processes: CuPy's on-disk kernel cache under `$HOME` warms every later process. A true cold needs `CUPY_CACHE_DIR` pointed at a fresh directory per capture; M2 decides whether that belongs in the accuracy preset.
 
+## Results (Perlmutter A100, GPU, standard tier, accuracy preset, 2026-09-24)
+
+- Self-check: all 9 ids bit-identical in float64 at 1024² with up to 40 slices and a 16×16 scan; speed spread ≤ 3 %. GPU float64 bit-identity now holds at two tiers on the A100; the fingerprint-scoped tolerance policy stays for other machines and the large tier.
+- v1.0.10 vs dev: potential 5.3e-8 (SrTiO3), exit wave `[order1]` 4.8e-6, CBED `[order1]` 2.6e-5 — the #269 residual compounds with thickness (10 → 40 slices: 2.5e-7 → 4.8e-6, 1.3e-6 → 2.6e-5). Default variants 6.5 / 9.0 relative, 3.1e-3 / 6.4e-4 intensity (#298, accepted). dev 1–5 % faster on every measurable case. `stem.multidetector` still `ERROR` on v1.0.10 (libnvvm).
+- Host-RSS offset is constant (~150–230 MB): ratio 1.11 on `potential.infinite` (1257 → 1401 MB, 1 GB array) vs 1.29–1.39 on small-array cases. Cause still open; `nominal_bytes` in M2 will report it as an absolute offset instead of a ratio flag.
+- New observation for M2's consistency pairs: lazy default `stem.multidetector` (`max_batch=8`) 6.46 s vs eager 2.58 s on the A100 with bit-identical outputs; `[auto]` (lazy, auto batch) 2.66 s. The cost is in small lazy batches. On the dev box CPU at quick the same pair is 4.5 vs 3.5 s.
+- Tier calibration: standard runs in about 6 minutes per ref on one A100 (accuracy preset, 3 repeats); the 900/1800 s timeouts are far from binding. Adequate as the GPU speed tier.
+
 ## Perlmutter procedure that worked (for the M3 runbook)
 
 Independent clone under `$PSCRATCH` (never the CI checkout); `UV_CACHE_DIR` on scratch (now in `hpcenvs/perlmutter/env.sh`); refs resolved on the host with `uv run --no-project python -P -m abtem_bench.prepare --ref origin/dev --ref v1.0.10` because the runtime image has no git (git added to the image on 2026-09-24, effective at the next rebuild); then one `srun ... podman-hpc run --rm --group-add keep-groups --gpu -v $CFS:$CFS -v $SCRATCH:$SCRATCH -v $HOME:$HOME -e PYTHONPATH=<clone>/benchmarks:<clone> -e OUT --workdir "$PWD" idrobolab:latest bash -c '...'` running self-check, both captures and compare. Whole sequence well under 15 minutes on one A100 in the shared QOS.
