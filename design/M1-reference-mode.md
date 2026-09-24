@@ -11,6 +11,19 @@ Status 2026-09-23: harness, four cases, tests and docs implemented on the `bench
 - `dev[order1]` vs `v1.0.10` (propagator held at order 1): a residual drift remains: `hrtem.exitwave` 2.5e-7, `diffraction.cbed` 1.3e-6, `stem.multidetector` 1.0e-6 relative, and `potential.infinite` itself 7.4e-8 relative (intensity 2.8e-8). Bisecting `potential.infinite` over the first-parent merges between v1.0.10 and dev with the harness itself points at `8fa77bdd`, PR #269 (potential chunking and GPU update, 2026-07-15), as the first merge that changes the CPU float64 infinite-projection potential (5.1e-8 relative). Not accepted: it is Toma's call whether this is an intended numerical change (it is far above float64 round-off) and it needs a reason line.
 - Speed and memory: no flags; dev is between 1 % slower and 9 % faster than v1.0.10 across the cases at this size, peak RSS within 5 %.
 
+## Results (Perlmutter A100, GPU, quick tier, accuracy preset, `idrobolab` container, 2026-09-24)
+
+- Self-check on GPU: all 9 case ids bit-identical in float64. The design's assumption that GPU float64 needs a tolerance did not materialise at quick-tier sizes on the A100; keep the fingerprint-scoped tolerance policy for larger tiers until measured.
+- Accuracy against v1.0.10: identical to the CPU numbers to two digits for every case and variant, so the #269 residual is device-independent (algorithmic, not reduction order).
+- `stem.multidetector` (all variants) is `ERROR` on v1.0.10: its detector kernels are `numba.cuda` (`abtem/core/_cuda.py` at v1.0.10, `@cuda.jit`) and need `libnvvm`, absent from the CUDA runtime image. dev's CuPy `RawModule` kernels need no NVVM. Measuring that case against v1.0.10 on GPU needs a `devel` image or a host CUDA toolkit; note for the M3 runbook and a release-notes line for v1.1 (no numba.cuda dependency on GPU).
+- Host RSS of dev GPU workers 730-830 MB vs v1.0.10 530-600 MB: a constant offset of about 240 MB on every comparable case, absent on CPU. Import-only RSS of both checkouts is equal on the ROCm dev box, so the cause is CUDA-specific and still open (candidates: CUDA-side libraries loaded by dev's `cupyx.scipy.signal`/RawModule paths). Follow up in M2 with the `nominal_bytes` field, which separates a constant offset from a scaling one.
+- GPU quick-tier wall times are 0.07-0.6 s; differences of tens of ms are launch jitter. compare marks speed ratios on runs shorter than `--min-time` (0.5 s) as `short` instead of flagging. GPU speed is judged on the standard tier.
+- Cold ratios on GPU (down to 0.15 in the self-check) are not comparable across processes: CuPy's on-disk kernel cache under `$HOME` warms every later process. A true cold needs `CUPY_CACHE_DIR` pointed at a fresh directory per capture; M2 decides whether that belongs in the accuracy preset.
+
+## Perlmutter procedure that worked (for the M3 runbook)
+
+Independent clone under `$PSCRATCH` (never the CI checkout); `UV_CACHE_DIR` on scratch (now in `hpcenvs/perlmutter/env.sh`); refs resolved on the host with `uv run --no-project python -P -m abtem_bench.prepare --ref origin/dev --ref v1.0.10` because the runtime image has no git (git added to the image on 2026-09-24, effective at the next rebuild); then one `srun ... podman-hpc run --rm --group-add keep-groups --gpu -v $CFS:$CFS -v $SCRATCH:$SCRATCH -v $HOME:$HOME -e PYTHONPATH=<clone>/benchmarks:<clone> -e OUT --workdir "$PWD" idrobolab:latest bash -c '...'` running self-check, both captures and compare. Whole sequence well under 15 minutes on one A100 in the shared QOS.
+
 
 ## Goal
 
