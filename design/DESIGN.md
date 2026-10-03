@@ -246,20 +246,21 @@ Speed: ratio of warm medians candidate/reference, flagged when `|ratio - 1| > ma
 
 ```toml
 [[accepted]]
-case = "hrtem.exitwave@*"         # glob over case ids or names; brackets are literal
+case = "hrtem.exitwave@quick/*"   # glob over case ids or names; brackets are literal
 since = "v1.0.10"                 # reference the acceptance applies against
 reason = "Exact Fresnel propagator is the default (#298); order-1 phase error removed."
 pr = 298
-max_intensity = 6.2e-3            # optional bounds per output: max_rel, max_intensity, max_abs_norm
+max_abs_norm = 6e-3               # required bound per output
+max_intensity = 5e-4              # optional bounds per output: max_rel, max_intensity
 ```
 
-An entry applies only when the reference bundle was captured at `since` (its ref label, its `git describe`, or a sha prefix of at least seven hex digits); against any other reference it is listed as not applied, so an acceptance never hides drift against a later reference. A `DRIFT` that matches applying entries becomes `ACCEPTED` unless it exceeds a bound of any of them, in which case it stays `DRIFT` with a note. Every matching entry is credited. The report renders the applying entries as a changelog table (case glob, since, PR, reason, bounds, matched ids, measured drift). Entries are validated: non-empty `case`, `since` and `reason`, an integer `pr`, positive finite bounds, no unknown keys, and a glob that matches at least one registered case id; an applying entry that matches no drift is reported as stale so the file cannot rot.
+An entry applies only when the reference bundle was captured at `since` (its ref label, its `git describe`, or a sha prefix of at least seven hex digits); against any other reference it is listed as not applied, so an acceptance never hides drift against a later reference. A `DRIFT` that matches applying entries becomes `ACCEPTED` unless it exceeds a bound of any of them, or an output holds a NaN or infinity the other lacks, in which case it stays `DRIFT` with a note. `max_abs_norm` is required in every entry: the integrated intensity is unchanged by a shift, a flip or a phase scramble of an output, so only a bound on the largest elementwise difference rejects a corrupted result. Every matching entry is credited. The report renders the applying entries as a changelog table (case glob, since, PR, reason, bounds, matched ids, measured drift). Entries are validated: non-empty `case`, `since` and `reason`, an integer `pr`, positive finite bounds, no unknown keys, and a glob that matches at least one registered case id; an applying entry that covers a compared case but matches no drift is reported as stale so the file cannot rot.
 
 How a pull request's own entry applies to the merge-base reference of the M4 gate (whose sha is not known when the entry is written) is decided in M4.
 
 ### 8.4 Reports
 
-Markdown table, one row per paired case id, columns: verdict, `identical`, `max_abs_norm`, `rel_above`, `intensity`, time ratio (with the two medians), RSS ratio, VRAM ratio, status notes. Every table states what varies down the rows (case ids), across the columns (metrics) and what each cell reports relative to which reference, per the house rule. Also `compare.json` (machine-readable, includes the noise floor used) and an exit code controlled by `--fail-on`, a comma-separated list of gates: `drift`, `shape`, `error` (a failed run on the candidate side, including `SKIPPED-MEMORY`), `missing` (`ONLY-A`), `speed[:<N>%]`, `memory[:<N>%]` (needs a noise floor). Exit 0 when every gate passes, 1 when one fails, 2 on an input error: an unknown gate, a missing bundle, bundles with different case hashes or presets (unless allowed), bundles sharing no case id, or an invalid `accepted_changes.toml`.
+Markdown table, one row per paired case id, columns: verdict, `identical`, `max_abs_norm`, `rel_above`, `intensity`, time ratio (with the two medians), RSS ratio, VRAM ratio, status notes. Every table states what varies down the rows (case ids), across the columns (metrics) and what each cell reports relative to which reference, per the house rule. Also `compare.json` (machine-readable, includes the noise floor used) and an exit code controlled by `--fail-on`, a comma-separated list of gates: `drift`, `shape`, `error` (a failed run on the candidate side, including `SKIPPED-MEMORY`), `missing` (`ONLY-A`), `speed[:<N>%]`, `memory[:<N>%]` (needs a noise floor). `error` also covers a case only the candidate holds, and `missing` a case the candidate reports `UNSUPPORTED` where the reference ran it. Exit 0 when every gate passes, 1 when one fails, 2 when the comparison cannot be made: an unknown or empty gate list, a missing or unreadable bundle, bundles with different case hashes or presets (unless allowed), bundles sharing no case id, an invalid `accepted_changes.toml`, or any other error. `capture` exits 1 when a case failed.
 
 ## 9. Meters
 
