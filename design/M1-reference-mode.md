@@ -2,7 +2,7 @@
 
 Target: about two weeks of work; one PR on abTEM (`benchmark-suite` branch, base `dev`), one release on abtem-benchmarks.
 
-Status 2026-10-03: implemented on the `benchmark-suite` branch, rebased onto dev `a562ce4a`, with the fixes from two independent reviews (fresh records per run, the worker's own peak RSS, case hash over every module that shapes a case, accepted changes scoped by `since` and bounded, a strict `--fail-on`, the `--min-delta` rule, floors for memory, VRAM and accuracy). Every drift against v1.0.10 is explained and accepted. Remaining for M1: the PR itself.
+Status 2026-10-03: implemented on the `benchmark-suite` branch, rebased onto dev `a562ce4a`, with the fixes from three review rounds (fresh records per run, the worker's own peak RSS with the meter recorded, case hash over every module that shapes a case, accepted changes scoped by `since` and bounded, with `max_abs_norm` required, a strict `--fail-on` with exit 2 for any input error or crash, the `--min-delta` rule, floors for memory, VRAM and accuracy, `--overwrite` limited to bundles). Every drift against v1.0.10 is explained and accepted. Remaining for M1: the PR itself.
 
 ## Results (workstation CPU, quick tier, accuracy preset, 2026-10-03)
 
@@ -10,9 +10,27 @@ Captured on a 24-thread AMD Ryzen AI MAX PRO 390 at dev `a562ce4a`. Bundles and 
 
 - Self-check (dev captured twice, interleaved): all 9 case ids bit-identical; speed spread at most 3.3 %, peak-RSS spread at most 0.8 %. An earlier capture showed dev `a562ce4a` bit-identical to dev `fba42a98` on all 9 ids.
 - dev vs v1.0.10, default variants, the exact propagator (#298), per output (relative error / integrated intensity): exit wave 5.2e-3 / 4.8e-6, its SAED pattern 1.6e-1 / 2.0e-4, CBED 1.2 / 1.2e-4, ADF 5.1e-3 / 3.9e-3, BF 5.4e-5 / 8.0e-6, segmented 1.4e-3 / 1.0e-4. Accepted under PR 298, bounded in intensity at about twice the largest value measured on the quick and standard tiers.
-- dev `[order1]` vs v1.0.10 (propagator held at order 1): potential 7.4e-8 / 2.8e-8, exit wave 6.8e-8, SAED 2.5e-7 / 9.9e-8, CBED 1.3e-6 / 2.5e-8, segmented 1.0e-6 / 2.0e-7, ADF 1.4e-7, BF 1.6e-8. Cause: v1.0.10's `projected_scattering_factor` in `abtem/parametrizations/functions/lobato.py` builds `pi` and `pi**2` as float32 arrays; #269 (merge `8fa77bdd`) made them float64. The first-parent bisect lands on `8fa77bdd` (its first parent is bit-identical to v1.0.10), and dev with v1.0.10's `projected_scattering_factor` swapped in builds a potential bit-identical to v1.0.10's. Accepted under PR 269, bounded in relative error and intensity. A changed summation order cannot explain it: dev's potential is bit-identical for slice chunk sizes 1, 4, 22 and auto.
+- dev `[order1]` vs v1.0.10 (propagator held at order 1): potential 7.4e-8 / 2.8e-8, exit wave 6.8e-8, SAED 2.5e-7 / 9.9e-8, CBED 1.3e-6 / 2.5e-8, segmented 1.0e-6 / 2.0e-7, ADF 1.4e-7, BF 1.6e-8. Cause: two float32 roundings in v1.0.10 that #269 (merge `8fa77bdd`) made float64: `pi` and `pi**2` in `projected_scattering_factor` (`abtem/parametrizations/functions/lobato.py`), and the accumulator of `DiffractionPatterns._radial_binning` (`abtem/measurements.py:3061` at v1.0.10), which the segmented detector uses. The first-parent bisect lands on `8fa77bdd` (its first parent is bit-identical to v1.0.10). With both restored to float32 in dev, the `[order1]` outputs of `potential.infinite`, `hrtem.exitwave` and `stem.multidetector` are bit-identical to v1.0.10's and the CBED pattern differs by 7e-14 (in the SrTiO3 potential, every even slice by 1.5e-14; mechanism not isolated). The accumulator is most of the segmented drift. Accepted under PR 269, bounded in all three metrics. A changed summation order cannot explain it: dev's potential is bit-identical for slice chunk sizes 1, 4, 22 and auto.
 - Speed and memory: dev 1 % to 19 % faster than v1.0.10 and peak RSS within 5 %, but v1.0.10 was captured after the self-check rather than interleaved with dev, on a machine with a load average of 3 to 5; read as "no slowdown" only.
 - Slices per case (from `Potential.num_slices` at the tier parameters): quick: potential 22, hrtem 28, cbed 40, stem 22; standard: potential 30, hrtem 157, cbed 157, stem 41.
+
+## Results (workstation CPU, standard tier, accuracy preset, 2026-10-03)
+
+Captured per case group (`rest` = potential, HRTEM and CBED cases; `stem`; `stem-order1`) with the harness at `98675b45`, one cold run per case. Rows: accepted-changes entry; cells: the largest value over the case's outputs of rel / |intensity| / max_abs_norm, dev against v1.0.10.
+
+| entry | quick tier | standard tier |
+|---|---|---|
+| `hrtem.exitwave` (#298) | 0.16 / 2.0e-4 / 2.8e-3 | 6.5 / 3.1e-3 / 0.25 |
+| `diffraction.cbed` (#298) | 1.2 / 1.2e-4 / 2.2e-3 | 9.0 / 6.4e-4 / 7.7e-2 |
+| `stem.multidetector` (#298) | 5.1e-3 / 3.9e-3 / 4.9e-3 | 4.0e-3 / 7.9e-4 / 4.0e-3 |
+| `potential.infinite` (#269) | 7.4e-8 / 2.8e-8 / 5.1e-8 | 5.3e-8 / 2.8e-8 / 5.2e-8 |
+| `hrtem.exitwave[order1]` (#269) | 2.5e-7 / 9.9e-8 / 9.5e-8 | 4.8e-6 / 1.6e-7 / 6.0e-7 |
+| `diffraction.cbed[order1]` (#269) | 1.3e-6 / 2.5e-8 / 2.2e-7 | 2.6e-5 / 3.9e-8 / 2.8e-7 |
+| `stem.multidetector[order1]` (#269) | 1.0e-6 / 2.0e-7 / 5.5e-7 | 3.7e-6 / 7.5e-7 / 3.2e-6 |
+
+- The non-STEM standard values agree with the A100's to two digits; STEM at standard had not been measured before (v1.0.10's STEM fails on the A100 image).
+- `accepted_changes.toml` bounds are about twice the larger of the two columns, rounded up to one significant digit; the #298 HRTEM and CBED entries are split per tier because their `max_abs_norm` grows about a hundred-fold. `[eager]` and `[auto]` were not captured at standard (their quick-tier outputs equal the default's) and share the default's bounds.
+- The standard `stem.multidetector` takes 2618 to 2822 s cold on CPU (four captures running at once), beyond its former 1800 s timeout; the tier now declares 5400 s.
 
 ## Results (Perlmutter A100, GPU, quick tier, accuracy preset, 2026-09-24)
 
