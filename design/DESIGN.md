@@ -30,7 +30,7 @@ Non-goals: validation of the physics against other codes or experiment; kernel m
 | propagator | not addressed | `[order1]` variant on the candidate isolates #298 from all other changes | verified: `algorithm=FourierMultislice(order=1)` accepted on v1.0.10 and dev |
 | GPAW in CI | GPAW-tagged cases skipped | no built-in transition potentials exist in abTEM; CI uses a seeded synthetic `TransitionPotentialArray`, local tiers use a precomputed real O K asset | verified 2026-09-18 |
 | case identity | none | sha256 of case sources in every manifest; compare refuses mismatches | Toma |
-| peak RSS | sampler thread + `ru_maxrss` | `os.wait4` rusage of the case subprocess; sampler optional and off by default | memory study 2026-09-15 |
+| peak RSS | sampler thread + `ru_maxrss` | the worker's own `VmHWM`, the meter named in the record (`rss_meter`); `os.wait4` rusage recorded alongside; sampler optional and off by default | memory study 2026-09-15; review 2026-10-03 |
 | memory repeats | N repeats in one process | one shot per process, N processes, median | GPU path leaks ~40 MB per identical repeat |
 | cache-keying bugs | not covered | `consistency.cache_reuse` runs two grids and two elements in one process | issue history (integral-table and scattering-factor caches keyed on symbol only) |
 | graph transport | not covered | optional meter: task count and pickled graph bytes for lazy cases | PR #386 lesson |
@@ -213,7 +213,7 @@ One repeat per process, N fresh processes (default 3, 1 for `large`), median of 
 
 `manifest.json`: `schema_version`, `harness_version`, `case_hash`, `ref` (label, sha, `git describe`, dirty flag), `abtem_version`, `abtem_file`, `preset`, `tier`, `device`, `timestamp_utc`, `fingerprint` (python, numpy, scipy, dask, pyfftw, numba, cupy, gpaw versions; CPU model and count; GPU name and driver; OS), `config` (resolved abtem config), `dask_config`, `env` (thread and seed variables), `command`.
 
-`cases/<id>.json`: `status` (`OK`, `UNSUPPORTED`, `ERROR`, `OOM`, `TIMEOUT`, `SKIPPED-MEMORY`), `error`, `timings` (`setup`, `cold`, `warm` list, `median`, `min`, `cpu_time`), `memory` (`peak_rss_bytes` = the worker's `VmHWM`, `peak_rss_wait4_bytes`, `peak_vram_pool_bytes`, `peak_vram_device_bytes`, `nominal_bytes`; the VRAM fields are null on CPU cases), `graph` (`n_tasks`, `pickled_bytes`, optional), `outputs` (name, shape, dtype, invariants, file), `params` (resolved tier and variant parameters), `requires_result`.
+`cases/<id>.json`: `status` (`OK`, `UNSUPPORTED`, `ERROR`, `OOM`, `TIMEOUT`, `SKIPPED-MEMORY`), `error`, `timings` (`setup`, `cold`, `warm` list, `median`, `min`, `cpu_time`), `memory` (`peak_rss_bytes` = the worker's `VmHWM`, `rss_meter`, `peak_rss_wait4_bytes`, `peak_vram_pool_bytes`, `peak_vram_device_bytes`, `nominal_bytes`; the VRAM fields are null on CPU cases), `graph` (`n_tasks`, `pickled_bytes`, optional), `outputs` (name, shape, dtype, invariants, file), `params` (resolved tier and variant parameters), `requires_result`.
 
 `<output>.npz`: `array` (native dtype), `axes` (JSON string of `axis_to_dict` list), `metadata` (JSON string).
 
@@ -230,7 +230,7 @@ For candidate `a` and reference `r`, both host numpy arrays:
 - `rel_above`: `max |a - r| / |r|` over elements with `|r| > above_rel * max|r|` (default `above_rel = 1e-6`), i.e. the `check_above_rel` semantics of `array_is_close`. Complex arrays are compared jointly: `|a - r|` is the modulus of the complex difference, which bounds the error of the real part, the imaginary part and `|a|` alike.
 - `intensity`: `(sum(a) - sum(r)) / sum(r)` for real measurements; for complex waves `sum|a|²`.
 - Only elements finite in both arrays enter these three; an element NaN in both, or the same infinity in both, is left out, and any other non-finite element makes `max_abs_norm` and `rel_above` infinite (`nonfinite_mismatch` counts them). A NaN anywhere in the vector counts as beyond tolerance.
-- `shape_ok`, `dtype_ok`, `axes_ok`: numeric axis fields (sampling, offset, ordinal values) compared to a relative 1e-9, other fields (type, units) exactly. Labels, typeset labels, abtem's internal `_` fields and fields present on one side only are listed in the report but do not change the verdict: a renamed axis is not a changed result.
+- `shape_ok`, `dtype_ok`, `axes_ok`: numeric axis fields (sampling, offset, ordinal values) compared to a relative 1e-9, other fields (type, units) exactly. NaN equals NaN. A grid-defining field (type, sampling, offset, values, units, endpoint) present with a value on one side only is a mismatch; labels, typeset labels, abtem's internal `_` fields and other one-sided fields are named in the report but do not change the verdict: a renamed axis is not a changed result. Output metadata is compared by the same rules and reported, never judged.
 
 Implementation: `array_is_close` is promoted from `test/utils.py` into `abtem/core/testing.py` unchanged (test/utils.py re-exports it), and a sibling `close_stats(a, r, above_rel=1e-6)` returning the vector is added next to it. Compare calls `close_stats` and decides the verdict from the vector against the case's `Tolerance` (`rel`, `intensity`, `max_abs_norm`).
 
