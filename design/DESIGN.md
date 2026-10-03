@@ -2,7 +2,7 @@
 
 Status: posted for review on #380 on 2026-09-18 (design summary) with two follow-ups on 2026-09-18 (repository roles) and 2026-09-19 (routine tier and profiling mode); Toma has not yet replied to any of the three as of 2026-09-23. The two follow-ups are recorded as open proposals in section 15.2 and are not part of this design until accepted. M1 is unaffected by either and has started. Supersedes `DESIGN-v1-2026-09-10.md` (kept for the record). Revised after Toma Susi's reply of 2026-09-17 on [abTEM discussion #380](https://github.com/abTEM/abTEM/discussions/380) and the lessons recorded from earlier benchmark work (see `../legacy/PROVENANCE.md`). Milestones: `M0-consolidation.md` to `M4-ci-and-retirement.md`.
 
-Repository split: the harness (`benchmarks/abtem_bench`) and the case definitions (`benchmarks/cases`) live in `abTEM/abTEM`; reference bundles, this design, and the frozen legacy scripts live in `abTEM/abtem-benchmarks`. (The roles of the two repositories are under discussion, see 15.2.)
+Repository split: the harness (`benchmarks/abtem_bench`) and the case definitions (`benchmarks/abtem_bench/cases`) live in `abTEM/abTEM`; reference bundles, this design, and the frozen legacy scripts live in `abTEM/abtem-benchmarks`. (The roles of the two repositories are under discussion, see 15.2.)
 
 ## 1. Purpose
 
@@ -75,12 +75,12 @@ The three modes share the registry, worker, meters, store and compare. Only the 
 
 ### 4.2 Layers
 
-- `cases/`: declarative case definitions, pure abtem API calls plus parameter tables. No timing, no measurement.
+- `abtem_bench/cases/`: declarative case definitions, pure abtem API calls plus parameter tables. No timing, no measurement. (A subpackage of the harness, so an install of `benchmarks/` does not create a top-level `cases` package.)
 - `abtem_bench/registry.py`: `@case` decorator, `Case`, `Tier`, `Variant`, `Tolerance`, case-id rules, case hash.
 - `abtem_bench/presets.py`: determinism presets applied inside the worker before `import abtem` side effects matter (config keys, dask config, env, seeds).
 - `abtem_bench/worker.py`: runs exactly one case id in a fresh process: apply preset, build (untimed), cold run, warm repeats, collect outputs, write the case record.
 - `abtem_bench/meters.py`: wall clock with GPU synchronisation, process CPU time, VRAM sampler (pool and driver), optional RSS sampler, optional graph meter.
-- `abtem_bench/runner.py`: worktrees, environment assembly, subprocess launch, `os.wait4` peak RSS, timeouts, stderr classification, interleaving, rounds.
+- `abtem_bench/runner.py`: worktrees, environment assembly, subprocess launch, timeouts, stderr classification, interleaving, rounds.
 - `abtem_bench/store.py`: schema, manifest, case records, `.npz` outputs, machine fingerprint, config dump, bundle read/write.
 - `abtem_bench/compare.py`: pairing, metric vector, verdicts, `accepted_changes`, noise-floor thresholds, Markdown and JSON reports, exit code.
 - `abtem_bench/refs.py`: bundle naming, upload and fetch via `gh release`, local cache under `~/.cache/abtem-bench/refs`.
@@ -90,8 +90,8 @@ The three modes share the registry, worker, meters, store and compare. Only the 
 ### 4.3 Invariants
 
 1. Harness and cases always come from the invoking checkout; only the `abtem` package is swapped per ref. Both refs execute byte-identical case code.
-2. Every manifest records `case_hash` = sha256 over the sorted contents of `cases/*.py` plus `abtem_bench/__version__`. Compare refuses to pair bundles with different hashes unless `--allow-case-mismatch` is passed, and then marks the report.
-3. A case whose API is missing on a ref declares `requires=<callable>`; the worker records `UNSUPPORTED` for that ref and the run continues.
+2. Every manifest records `case_hash` = sha256 over the sorted contents of `abtem_bench/cases/*.py` and of the harness modules that decide what a case computes and stores (`fixtures.py`, `presets.py`, `registry.py`, `worker.py`), plus `abtem_bench/__version__`. Compare refuses to pair bundles with different hashes unless `--allow-case-mismatch` is passed, and then marks the report.
+3. A case whose API is missing on a ref declares `requires=<callable>`; the worker records `UNSUPPORTED` for that ref and the run continues. (No M1 case needs one: v1.0.10 runs all four.)
 4. Compare never imports the ref's abtem. It reads the commit-independent store format only. It may import the invoking checkout's `abtem.core.testing` for `array_is_close`.
 5. One case id runs in one fresh subprocess. Nothing measured in one case can leak into the next (VRAM, FFTW wisdom, numba compilation, the GPU-path native-memory leak).
 6. The instrument never runs code on the thing it measures: no `client.run` on dask workers; distributed memory is read from `client.scheduler_info()["workers"][addr]["metrics"]["memory"]`; missing metrics are reported as `n/a`.
@@ -106,7 +106,7 @@ v1.0.10 is the tip of `main` and carries the same numpy >= 2, zarr >= 3.1 and da
 
 ### 4.5 Process model and failure handling
 
-Per case id and ref the runner spawns one worker with `cwd` set to the bundle directory (never a checkout). It waits with `os.wait4` and stores `ru_maxrss` as the authoritative peak RSS of that case. Timeouts per tier (quick 120 s, standard 900 s, large none by default) kill the process group and record `TIMEOUT`. Stderr is classified (`CUDA_ERROR_OUT_OF_MEMORY` and `CUDA_ERROR_ILLEGAL_ADDRESS` as `OOM`, cgroup kills as `OOM`, other CUDA codes as `ERROR` with the code) using the logic ported from `legacy/abtem-repo/benchmark_potential_chunking.py`. `--rounds N` repeats the whole interleaved matrix to expose drift over time.
+Per case id and ref the runner spawns one worker with `cwd` set to the bundle directory (never a checkout), after deleting any earlier record of that case id, so a worker that dies without writing one leaves an `ERROR` row, never the previous run's record. A capture refuses an output directory that already holds files unless `--overwrite` is passed. Peak RSS is the worker's own `VmHWM` (section 9); the runner also stores `ru_maxrss` from `os.wait4` for reference. Timeouts per tier (quick 120 s, standard 900 s, large none by default; a tier may declare its own) kill the process group and record `TIMEOUT`. A case is skipped as `SKIPPED-MEMORY` when less than 8 GB is available at its start. Stderr is classified (`CUDA_ERROR_OUT_OF_MEMORY` and `CUDA_ERROR_ILLEGAL_ADDRESS` as `OOM`, cgroup kills as `OOM`, other CUDA codes as `ERROR` with the code) using the logic ported from `legacy/abtem-repo/benchmark_potential_chunking.py`. `--rounds N` repeats the whole interleaved matrix to expose drift over time; the record keeps every round's timings and recomputes median, minimum and cold statistics over all of them.
 
 ## 5. Case contract
 
@@ -188,7 +188,7 @@ Pinned before any abtem computation, then the fully resolved `abtem.config.confi
 
 Expectation on CPU: bit-identical outputs for the same case on the same machine and the same ref, across processes and across days (verified by the self-check; CLAUDE.md records that FFTW_ESTIMATE plus one thread and one worker is the necessary combination). Numba kernels compiled with `fastmath=True` are deterministic on one machine but not across CPU generations, so bit identity is claimed only for matching machine fingerprints (section 10).
 
-Expectation on GPU: reductions in cuFFT and CuPy are not order-stable across runs, and the finite-projection integrator is known to differ at ~1e-7 relative between runs. GPU float64 is therefore compared with the tolerance measured by the self-check on that machine, and the `identical` flag is reported but not required.
+Expectation on GPU: reductions in cuFFT and CuPy are not order-stable across runs, and the finite-projection integrator is known to differ at ~1e-7 relative between runs. GPU float64 is therefore compared with the case tolerance widened to three times the spread the self-check measured on that machine (`--noise`), and the `identical` flag is reported but not required. On the A100 the quick and standard tiers turned out bit-identical across processes anyway (M1 results).
 
 ### 6.2 `float32-tracking`
 
@@ -200,7 +200,7 @@ Shipped FFTW settings (`FFTW_MEASURE`, wisdom per process) because that is what 
 
 ### 6.4 `memory`
 
-One repeat per process, N fresh processes (default 3, 1 for `large`), median of the per-process `wait4` peak. Rationale: the GPU path retains about 40 MB of native memory per identical repeat and FFTW_MEASURE trial plans produced a 2.7× run-to-run spread in peak RSS on unchanged code; a single measurement is never a regression. `auto` variants (batch and chunk sizes from free memory) are reported and never flagged.
+One repeat per process, N fresh processes (default 3, 1 for `large`), median of the per-process peak. Rationale: the GPU path retains about 40 MB of native memory per identical repeat and FFTW_MEASURE trial plans produced a 2.7× run-to-run spread in peak RSS on unchanged code; a single measurement is never a regression. This mode is M3. Until then compare reports the peak RSS of the one process that ran the cold call and the warm repeats, and flags memory and VRAM only against a noise floor from a self-check, never on its own. `auto` variants (batch and chunk sizes from free memory) are reported and never flagged.
 
 ## 7. Store format
 
@@ -213,7 +213,7 @@ One repeat per process, N fresh processes (default 3, 1 for `large`), median of 
 
 `manifest.json`: `schema_version`, `harness_version`, `case_hash`, `ref` (label, sha, `git describe`, dirty flag), `abtem_version`, `abtem_file`, `preset`, `tier`, `device`, `timestamp_utc`, `fingerprint` (python, numpy, scipy, dask, pyfftw, numba, cupy, gpaw versions; CPU model and count; GPU name and driver; OS), `config` (resolved abtem config), `dask_config`, `env` (thread and seed variables), `command`.
 
-`cases/<id>.json`: `status` (`OK`, `UNSUPPORTED`, `ERROR`, `OOM`, `TIMEOUT`), `error`, `timings` (`setup`, `cold`, `warm` list, `median`, `min`, `cpu_time`), `memory` (`peak_rss_bytes` from `wait4`, `peak_vram_pool_bytes`, `peak_vram_device_bytes`, `nominal_bytes`), `graph` (`n_tasks`, `pickled_bytes`, optional), `outputs` (name, shape, dtype, invariants, file), `params` (resolved tier and variant parameters), `requires_result`.
+`cases/<id>.json`: `status` (`OK`, `UNSUPPORTED`, `ERROR`, `OOM`, `TIMEOUT`, `SKIPPED-MEMORY`), `error`, `timings` (`setup`, `cold`, `warm` list, `median`, `min`, `cpu_time`), `memory` (`peak_rss_bytes` = the worker's `VmHWM`, `peak_rss_wait4_bytes`, `peak_vram_pool_bytes`, `peak_vram_device_bytes`, `nominal_bytes`; the VRAM fields are null on CPU cases), `graph` (`n_tasks`, `pickled_bytes`, optional), `outputs` (name, shape, dtype, invariants, file), `params` (resolved tier and variant parameters), `requires_result`.
 
 `<output>.npz`: `array` (native dtype), `axes` (JSON string of `axis_to_dict` list), `metadata` (JSON string).
 
@@ -227,11 +227,12 @@ For candidate `a` and reference `r`, both host numpy arrays:
 
 - `identical`: `a.shape == r.shape and a.dtype == r.dtype and np.array_equal(a, r)` (NaN-aware).
 - `max_abs_norm`: `max|a - r| / max|r|`.
-- `rel_above`: `max |a - r| / |r|` over elements with `|r| > above_rel * max|r|` (default `above_rel = 1e-6`), i.e. the `check_above_rel` semantics of `array_is_close`. Complex arrays compare real and imaginary parts and also `|a|`.
+- `rel_above`: `max |a - r| / |r|` over elements with `|r| > above_rel * max|r|` (default `above_rel = 1e-6`), i.e. the `check_above_rel` semantics of `array_is_close`. Complex arrays are compared jointly: `|a - r|` is the modulus of the complex difference, which bounds the error of the real part, the imaginary part and `|a|` alike.
 - `intensity`: `(sum(a) - sum(r)) / sum(r)` for real measurements; for complex waves `sum|a|²`.
-- `shape_ok`, `dtype_ok`, `axes_ok` (sampling, offset, units, labels, ordinal values compared exactly).
+- Only elements finite in both arrays enter these three; an element NaN in both, or the same infinity in both, is left out, and any other non-finite element makes `max_abs_norm` and `rel_above` infinite (`nonfinite_mismatch` counts them). A NaN anywhere in the vector counts as beyond tolerance.
+- `shape_ok`, `dtype_ok`, `axes_ok`: numeric axis fields (sampling, offset, ordinal values) compared to a relative 1e-9, other fields (type, units) exactly. Labels, typeset labels, abtem's internal `_` fields and fields present on one side only are listed in the report but do not change the verdict: a renamed axis is not a changed result.
 
-Implementation: `array_is_close` is promoted from `test/utils.py` into `abtem/core/testing.py` unchanged (test/utils.py re-exports it), and a sibling `close_stats(a, r, above_rel=1e-6)` returning the vector is added next to it. Compare calls `close_stats` and uses `array_is_close(rel_tol=..., check_above_rel=...)` for the pass/fail decision, always with explicit tolerances (both default to infinity and pass silently otherwise).
+Implementation: `array_is_close` is promoted from `test/utils.py` into `abtem/core/testing.py` unchanged (test/utils.py re-exports it), and a sibling `close_stats(a, r, above_rel=1e-6)` returning the vector is added next to it. Compare calls `close_stats` and decides the verdict from the vector against the case's `Tolerance` (`rel`, `intensity`, `max_abs_norm`).
 
 ### 8.2 Verdicts
 
@@ -239,29 +240,32 @@ Implementation: `array_is_close` is promoted from `test/utils.py` into `abtem/co
 
 Consistency pairs are evaluated within one bundle with their own tolerance (for example CPU vs GPU float64 at the self-check floor, PRISM vs multislice at 1e-3 relative) and additionally reported as "gap widened" when the candidate's gap exceeds the reference's gap by more than the noise floor.
 
-Speed: ratio of warm medians candidate/reference, flagged when `|ratio - 1| > max(threshold, 3 × noise floor)`; default threshold 10 %. Memory: ratio of peak RSS and of peak VRAM, default threshold 5 %, `auto` variants never flagged.
+Speed: ratio of warm medians candidate/reference, flagged when `|ratio - 1| > max(threshold, 3 × noise floor)`; default threshold 10 %. A ratio beyond threshold whose two medians differ by less than `--min-delta` (default 0.05 s) is marked `short` instead: on the GPU quick tier tens of milliseconds are launch jitter, while a sub-second case that slows ten-fold is still flagged. Memory: ratio of peak RSS and of peak VRAM (CuPy pool), default threshold 5 %, flagged only against a noise floor (section 6.4). `auto` variants and attribution rows are never flagged. Gates fail on increases only; a decrease beyond threshold is flagged in the report and passes.
 
 ### 8.3 `accepted_changes.toml`
 
 ```toml
 [[accepted]]
-case = "hrtem.exitwave*"          # glob over case ids, tier and device optional
+case = "hrtem.exitwave@*"         # glob over case ids or names; brackets are literal
 since = "v1.0.10"                 # reference the acceptance applies against
 reason = "Exact Fresnel propagator is the default (#298); order-1 phase error removed."
 pr = 298
+max_intensity = 6.2e-3            # optional bounds per output: max_rel, max_intensity, max_abs_norm
 ```
 
-A `DRIFT` that matches an entry becomes `ACCEPTED`; the report renders every matched entry as a changelog table (case, reason, PR, measured drift vector). Entries are validated: unknown case globs fail the run, and an entry that no longer matches a drift is reported as stale so the file cannot rot.
+An entry applies only when the reference bundle was captured at `since` (its ref label, its `git describe`, or a sha prefix of at least seven hex digits); against any other reference it is listed as not applied, so an acceptance never hides drift against a later reference. A `DRIFT` that matches applying entries becomes `ACCEPTED` unless it exceeds a bound of any of them, in which case it stays `DRIFT` with a note. Every matching entry is credited. The report renders the applying entries as a changelog table (case glob, since, PR, reason, bounds, matched ids, measured drift). Entries are validated: non-empty `case`, `since` and `reason`, an integer `pr`, positive finite bounds, no unknown keys, and a glob that matches at least one registered case id; an applying entry that matches no drift is reported as stale so the file cannot rot.
+
+How a pull request's own entry applies to the merge-base reference of the M4 gate (whose sha is not known when the entry is written) is decided in M4.
 
 ### 8.4 Reports
 
-Markdown table, one row per paired case id, columns: verdict, `identical`, `max_abs_norm`, `rel_above`, `intensity`, time ratio (with the two medians), RSS ratio, VRAM ratio, status notes. Every table states what varies down the rows (case ids), across the columns (metrics) and what each cell reports relative to which reference, per the house rule. Also `compare.json` (machine-readable, includes the noise floor used) and an exit code controlled by `--fail-on drift|shape|speed:<pct>|memory:<pct>`.
+Markdown table, one row per paired case id, columns: verdict, `identical`, `max_abs_norm`, `rel_above`, `intensity`, time ratio (with the two medians), RSS ratio, VRAM ratio, status notes. Every table states what varies down the rows (case ids), across the columns (metrics) and what each cell reports relative to which reference, per the house rule. Also `compare.json` (machine-readable, includes the noise floor used) and an exit code controlled by `--fail-on`, a comma-separated list of gates: `drift`, `shape`, `error` (a failed run on the candidate side, including `SKIPPED-MEMORY`), `missing` (`ONLY-A`), `speed[:<N>%]`, `memory[:<N>%]` (needs a noise floor). Exit 0 when every gate passes, 1 when one fails, 2 on an input error: an unknown gate, a missing bundle, bundles with different case hashes or presets (unless allowed), bundles sharing no case id, or an invalid `accepted_changes.toml`.
 
 ## 9. Meters
 
 - Wall clock: `time.perf_counter` around `run()`, with `cp.cuda.Stream.null.synchronize()` before stopping on GPU; `time.process_time` alongside.
-- Peak RSS: `ru_maxrss` from the parent's `os.wait4` on the worker (per-child rusage). `RUSAGE_CHILDREN` is a running maximum over every child ever reaped and is never used. An in-worker `/proc/self/status` sampler exists for time-resolved curves and is off by default because sampling perturbs memory-pressured runs.
-- Peak VRAM: in-worker thread at 5 ms reading `cp.get_default_memory_pool().used_bytes()` and `total - free` from `cp.cuda.Device().mem_info`. The second captures cuFFT workspace outside the pool. Both are driver or allocator queries and run no code on the computation.
+- Peak RSS: the worker's own `VmHWM` from `/proc/self/status`, read after the case finishes. `ru_maxrss` from the parent's `os.wait4` is recorded but not compared: Linux carries the parent's high-water mark into the child at fork and exec, so it never reads below the runner's own peak (measured: an empty child reports 11.6 MB from a fresh parent and 326.5 MB from one that had imported CuPy). `RUSAGE_CHILDREN` is a running maximum over every child ever reaped and is never used. An in-worker `/proc/self/status` sampler exists for time-resolved curves and is off by default because sampling perturbs memory-pressured runs.
+- Peak VRAM (GPU cases only; a CPU case never initialises the device): in-worker thread at 5 ms reading `cp.get_default_memory_pool().used_bytes()` and `total - free` from `cp.cuda.Device().mem_info`. The second captures cuFFT workspace outside the pool. Both are driver or allocator queries and run no code on the computation.
 - Graph transport (lazy cases, optional): number of tasks and `len(pickle.dumps(graph))` of the built graph before compute. Cheap, CPU-only, catches per-task payload copies (PR #386 shipped `scan_positions / max_batch` copies of a transition potential).
 - Distributed cases: worker memory read from `client.scheduler_info()` only.
 - Every meter records what it measured and its overhead estimate in the case record.
@@ -290,18 +294,18 @@ abTEM, branch `benchmark-suite` (PR to dev):
 
 ```
 benchmarks/
-  pyproject.toml            # package abtem_bench, console script abtem-bench, deps: numpy, tabulate; extras: none
+  pyproject.toml            # packages abtem_bench and abtem_bench.cases, console script abtem-bench, deps: numpy
   README.md
   accepted_changes.toml
   abtem_bench/
-    __init__.py  cli.py  registry.py  presets.py  worker.py  meters.py  runner.py  store.py  compare.py  refs.py  fixtures.py
-  cases/
-    __init__.py  potentials.py  hrtem.py  diffraction.py  stem.py  prism.py  phonons.py  energy.py  coreloss.py  bloch.py  consistency.py  gpu.py
+    __init__.py  cli.py  registry.py  presets.py  worker.py  meters.py  runner.py  store.py  compare.py  prepare.py  refs.py  fixtures.py
+    cases/
+      __init__.py  potentials.py  hrtem.py  diffraction.py  stem.py  prism.py  phonons.py  energy.py  coreloss.py  bloch.py  consistency.py  gpu.py
   tests/                    # harness unit tests: store round-trip, compare verdicts, accepted_changes validation, case hash, registry checks
 abtem/core/testing.py       # array_is_close (moved), close_stats (new); test/utils.py re-exports
 ```
 
-`python -m abtem_bench` works with `PYTHONPATH=benchmarks` or after `uv pip install -e benchmarks`; the runner always uses the `PYTHONPATH` form so the worker sees the invoking checkout's harness. The main `pyproject.toml` gains `[tool.setuptools.packages.find] exclude = ["benchmarks*", "test*"]` so nothing ships in the wheel. ruff already covers `benchmarks/` (only `test` is excluded); `mypy.ini` gains `files = abtem, benchmarks/abtem_bench`. The stale `.pre-commit-config.yaml` (black and flake8 at 120 columns) is aligned to ruff in M4. Harness tests run under `pytest benchmarks/tests` in the normal CI job.
+`python -m abtem_bench` works with `PYTHONPATH=benchmarks` or after `uv pip install -e benchmarks`; the runner always uses the `PYTHONPATH` form so the worker sees the invoking checkout's harness. The main `pyproject.toml` gains `[tool.setuptools.packages.find] exclude = ["benchmarks*", "test*"]` so nothing ships in the wheel. ruff already covers `benchmarks/` (only `test` is excluded). mypy checks the harness by path, `mypy --follow-imports=silent --ignore-missing-imports benchmarks/abtem_bench`. A `files` entry in `mypy.ini` is left out: following imports from the harness into abtem reports 295 errors in abtem's own modules (2026-10-03), none in the harness. The stale `.pre-commit-config.yaml` (black and flake8 at 120 columns) is aligned to ruff in M4. Harness tests run as their own step of the normal CI job, on Linux only (they read `/proc` and signal a worker): `PYTHONPATH=benchmarks python -P -m pytest benchmarks/tests`.
 
 abtem-benchmarks: `design/`, `legacy/`, `refs/` as in `../README.md` (layout under discussion, see 15.2).
 
