@@ -58,7 +58,7 @@ Non-goals: validation of the physics against other codes or experiment; kernel m
 | `python -m abtem_bench`, ruff, mypy | 12 |
 | case-definition hash in every result | 4.3, 7 |
 | do not delete legacy until reproduced; mine `benchmark_potential_chunking.py` | `../legacy/PROVENANCE.md`, M2, M4 |
-| CI label-triggered, required only after a month of zero false positives | 13 |
+| CI: correctness per pull request that changes `abtem/`, drift and self-check weekly, full matrix per release; required only after a month of zero false positives | 13 |
 | pin and record resolved config | 6.1, 7 |
 
 ## 4. Architecture
@@ -247,16 +247,16 @@ Speed: ratio of warm medians candidate/reference, flagged when `|ratio - 1| > ma
 ```toml
 [[accepted]]
 case = "hrtem.exitwave@quick/*"   # glob over case ids or names; brackets are literal
-since = "v1.0.10"                 # reference the acceptance applies against
+commit = "0a6f505a"               # the commit that made the change
 reason = "Exact Fresnel propagator is the default (#298); order-1 phase error removed."
 pr = 298
 max_abs_norm = 6e-3               # required bound per output
 max_intensity = 5e-4              # optional bounds per output: max_rel, max_intensity
 ```
 
-An entry applies only when the reference bundle was captured at `since` (its ref label, its `git describe`, or a sha prefix of at least seven hex digits); against any other reference it is listed as not applied, so an acceptance never hides drift against a later reference. A `DRIFT` that matches applying entries becomes `ACCEPTED` unless it exceeds a bound of any of them, or an output holds a NaN or infinity the other lacks, in which case it stays `DRIFT` with a note. `max_abs_norm` is required in every entry: the integrated intensity is unchanged by a shift, a flip or a phase scramble of an output, so only a bound on the largest elementwise difference rejects a corrupted result. Every matching entry is credited. The report renders the applying entries as a changelog table (case glob, since, PR, reason, bounds, matched ids, measured drift). Entries are validated: non-empty `case`, `since` and `reason`, an integer `pr`, positive finite bounds, no unknown keys, and a glob that matches at least one registered case id; an applying entry that covers a compared case but matches no drift is reported as stale so the file cannot rot.
+An entry is scoped by `commit`, the sha (seven to forty hex digits) of the commit that made the change: it applies only when the candidate contains that commit and the reference does not; against any other pair it is listed as not applied, so an acceptance never hides drift against a later reference. A `DRIFT` that matches applying entries becomes `ACCEPTED` unless it exceeds a bound of any of them, or an output holds a NaN or infinity the other lacks, in which case it stays `DRIFT` with a note. `max_abs_norm` is required in every entry: the integrated intensity is unchanged by a shift, a flip or a phase scramble of an output, so only a bound on the largest elementwise difference rejects a corrupted result. Every matching entry is credited. The report renders the applying entries as a changelog table (case glob, commit, PR, reason, bounds, matched ids, measured drift). Entries are validated: non-empty `case` and `reason`, a `commit` sha, an integer `pr`, positive finite bounds, no unknown keys, and a glob that matches at least one registered case id; an applying entry that covers a compared case but matches no drift is reported as stale so the file cannot rot.
 
-How a pull request's own entry applies to the merge-base reference of the M4 gate (whose sha is not known when the entry is written) is decided in M4.
+A pull request's own entry names a commit of its branch: against the merge base, the per-PR check of section 13 finds it in the candidate and not in the reference, and abTEM's merge commits keep it in dev's history after the merge.
 
 ### 8.4 Reports
 
@@ -312,11 +312,11 @@ abtem-benchmarks: `design/`, `legacy/`, `refs/` as in `../README.md` (layout und
 
 ## 13. CI
 
-Workflow `benchmark.yml`, `workflow_dispatch` and pull requests labelled `benchmark`; ubuntu, Python 3.12, `uv sync --group test`, no GPAW, no GPU:
+No speed or memory capture runs on pull requests: hosted runners spread by up to 25 % between processes, so a speed gate would mostly raise false alarms. Correctness is deterministic on one runner and cheap at the quick tier, so it is checked per pull request; everything else runs weekly or per release. Both refs of a comparison run in one environment, with only `abtem` swapped through `PYTHONPATH`, so no comparison here covers a dependency change.
 
-1. A/B gate: quick tier, CPU, `accuracy` preset, PR head vs merge base with dev, interleaved, in the same job. Expectation bit-identical; `DRIFT` or `SHAPE` fails unless matched by `accepted_changes.toml` changed in the same PR. This answers "did this PR change results".
-2. Informational: compare the PR head against the latest tag bundle fetched from abtem-benchmarks; posted to the job summary, never failing. This is the running v1.1 release-notes table.
-3. Self-check on dev, weekly, to accumulate the false-positive record. The check becomes required only after about a month with zero false positives.
+1. Per pull request into dev that changes `abtem/` (workflow `benchmark.yml`, path filter; ubuntu, Python 3.12, `uv sync --group test`, no GPAW, no GPU): quick tier, CPU, `accuracy` preset, PR head against its merge base with dev, interleaved, in the same job; `--fail-on drift,shape,error,missing`. The reference is the merge base, not the tip of dev: an `accepted_changes.toml` entry applies only when the candidate contains its commit and the reference does not, so against a dev tip that has moved on, a numerics change merged meanwhile would show as drift no entry can accept. The pull request that changes the numerics carries its own entry, written by its author; abTEM merges with merge commits, so the entry's commit stays in dev's history (a rebase of the branch changes it, and the entry follows). The harness's own tests run in every cell of the normal `tests` job.
+2. Weekly on dev: a small set of cases, dev against the last checked commit, both captured fresh in the same job and interleaved, with a self-check (dev against dev) in the same job; the same job compares dev against the latest tag bundle fetched from abtem-benchmarks (the running release-notes table), so drift below tolerance cannot accumulate week by week. Correctness on a hosted runner; timing and memory only on a fixed machine, and there only with the self-check in the same job, since a shared machine is fixed but not quiet. The record of these runs decides when the per-PR check becomes required.
+3. Per release: the full matrix, every tier, thread counts, one to four GPUs and multi-GPU.
 
 Speed and memory are never judged on hosted runners. They run on the dev box and on Perlmutter with the same CLI (M3 runbook; the weekly GPU test job in `dev-env/cron` is the model, including its `ABTEM_CI_VENV` plus `PYTHONPATH` convention).
 

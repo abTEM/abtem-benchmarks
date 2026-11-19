@@ -8,7 +8,7 @@ Turn the suite into a gate that people trust, and remove the 13 one-off scripts 
 
 ## Scope
 
-- `.github/workflows/benchmark.yml`: label `benchmark` or `workflow_dispatch`; ubuntu, Python 3.12, `uv sync --group test`; job 1 A/B gate (quick, CPU, accuracy, head vs merge base, `--fail-on drift,shape`, `accepted_changes.toml` diff shown in the summary); job 2 informational compare against the latest tag bundle fetched from abtem-benchmarks; job 3 weekly self-check on dev writing its result to the job summary. `pytest benchmarks/tests` joins the normal test workflow.
+- `.github/workflows/benchmark.yml`, as DESIGN section 13 describes: job 1 per pull request into dev that changes `abtem/` (quick, CPU, `accuracy`, head against merge base, interleaved, `--fail-on drift,shape,error,missing`, the `accepted_changes.toml` diff shown in the summary); job 2 weekly on dev (a small set against the last checked commit, a dev-against-dev self-check in the same job, and an informational compare against the latest tag bundle fetched from abtem-benchmarks, all written to the job summary); a `workflow_dispatch` trigger for both. The harness's own tests already run in every cell of the `tests` job (#704). Timing and memory runs on a fixed machine (M3) carry their own self-check in the same job.
 - Required-check decision: after about a month, count self-check and gate outcomes; propose to Toma that the gate becomes required only if there were zero false positives.
 - `.pre-commit-config.yaml` aligned to ruff (drop black and flake8, add ruff and ruff-format), because pre-commit currently runs flake8 at 120 columns over `benchmarks/`.
 - Docs page in the abTEM docs repository: what the suite measures, how to add a case, how to accept a change, how to read the report (rows, columns, cells), how to run on your own machine.
@@ -23,8 +23,8 @@ Turn the suite into a gate that people trust, and remove the 13 one-off scripts 
 
 ## Exit criteria
 
-- A pull request labelled `benchmark` produces a job summary with the A/B table within the hosted-runner budget (target under 15 minutes wall).
-- The informational compare shows the v1.1 release-notes table for every PR against `refs-v1.0.10`.
+- A pull request into dev that changes `abtem/` produces a job summary with the A/B table within the hosted-runner budget (target under 15 minutes wall); one that does not change `abtem/` runs no capture.
+- The weekly job's informational compare shows the v1.1 release-notes table against `refs-v1.0.10`.
 - Zero false positives over the observation window, or each false positive has a root cause and a fix (a pin or a tolerance) before the required-check proposal is made.
 - `abTEM/benchmarks` contains only the harness, cases, tests and docs.
 
@@ -39,5 +39,6 @@ gh pr view <n> --json statusCheckRollup
 ## Risks
 
 - Hosted runners are slow and shared; the quick tier must stay under the budget, so any new case that pushes the quick matrix past 10 minutes on the dev box is demoted to `standard`.
-- Fetching the tag bundle from another repository in CI is a network dependency; job 2 is informational precisely so a fetch failure never blocks a PR.
+- Fetching the tag bundle from another repository in CI is a network dependency; it runs only in the weekly job and is informational, so a fetch failure never blocks a pull request.
+- A dependency change (a numpy or scipy bump) is not covered by the per-PR check: both refs run in one environment.
 - Deleting the legacy scripts removes `benchmark_finite_projection.py` from `main` as well at the next release; the PR body says so.
